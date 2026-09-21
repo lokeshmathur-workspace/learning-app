@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Learning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,500;7..72,600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Design tokens ported verbatim from the approved prototype (green/serif
+   "paper" look, light + dark) — plan Phase G decision #7. */
+:root{
+  --bg:#F3F5F2;--card:#FFFFFF;--ink:#16201B;--muted:#58645D;--faint:#8A958E;--line:#DCE2DD;
+  --accent:#1E5A43;--accent-ink:#FFFFFF;--accent-bg:#E1EDE6;
+  --mark:#FBE28A;--mark-ink:#2E2500;--warn-bg:#FBEFD5;--warn:#7A5200;--danger:#A3302A;
+  --serif:'Literata',Georgia,'Times New Roman',serif;
+  --sans:'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101613;--card:#17201B;--ink:#E6ECE8;--muted:#A0ACA5;--faint:#78847D;--line:#2A3530;
+  --accent:#86C9A9;--accent-ink:#0E1F17;--accent-bg:#1B3228;
+  --mark:#6A5813;--mark-ink:#FFF3C4;--warn-bg:#3A2E12;--warn:#F2C66B;--danger:#F08A82;}}
+:root[data-theme="dark"]{
+  --bg:#101613;--card:#17201B;--ink:#E6ECE8;--muted:#A0ACA5;--faint:#78847D;--line:#2A3530;
+  --accent:#86C9A9;--accent-ink:#0E1F17;--accent-bg:#1B3228;
+  --mark:#6A5813;--mark-ink:#FFF3C4;--warn-bg:#3A2E12;--warn:#F2C66B;--danger:#F08A82;}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.55;-webkit-text-size-adjust:100%}
+main{max-width:680px;margin:0 auto;padding:18px 16px 56px}
+h1{font-family:var(--serif);font-weight:500;font-size:30px;line-height:1.15;margin:0;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:700;margin:28px 0 10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+h2 small{font-weight:500;color:var(--muted);font-size:13px}
+h3{font-family:var(--serif);font-weight:500;font-size:20px;margin:0}
+p{margin:0}
+a{color:var(--accent)}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:18px}
+.sub{color:var(--muted);font-size:14px;margin-top:4px}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;text-align:left;font:inherit;color:inherit}
+.stat b{display:block;font-family:var(--serif);font-weight:500;font-size:28px;line-height:1.1}
+.stat span{font-size:13px;color:var(--muted)}
+button.stat{cursor:pointer}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+.book{cursor:pointer}
+.book-title{font-family:var(--serif);font-size:19px;font-weight:500;line-height:1.3}
+.meta{font-size:13px;color:var(--muted);margin-top:2px}
+.row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:10px;overflow:hidden}
+.bar i{display:block;height:4px;background:var(--accent)}
+.pill{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--warn-bg);color:var(--warn);white-space:nowrap}
+.pill.ok{background:var(--accent-bg);color:var(--accent)}
+.btnrow{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.btnrow>*{flex:1 1 0;min-width:0}
+.btn{font:inherit;font-size:14px;font-weight:600;min-height:42px;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent);padding-left:6px;padding-right:6px}
+.btn.danger{color:var(--danger)}
+.btn:disabled{opacity:.55;cursor:default}
+.btn:focus-visible,.stat:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,.s:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.list{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--line);cursor:pointer}
+.li:first-child{border-top:0}
+.li-title{font-size:15px;font-weight:600}
+.empty{color:var(--muted);font-size:14px;padding:14px 16px;background:var(--card);border:1px dashed var(--line);border-radius:14px}
+.back{margin:-6px 0 10px -6px}
+.kicker{font-size:13px;color:var(--muted);font-weight:600}
+label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:14px 0 6px}
+input[type=text],input[type=url],input[type=number],input[type=password],textarea,select{width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+textarea{min-height:96px;resize:vertical;line-height:1.5}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{flex:1 1 0}
+.seg button[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+.reader{font-family:var(--serif);font-size:18px;line-height:1.8}
+.reader p{margin:0 0 14px}
+.pgno{font-family:var(--sans);font-size:12px;font-weight:700;color:var(--faint);margin:6px 0 8px}
+.s{cursor:pointer;border-radius:3px;-webkit-box-decoration-break:clone;box-decoration-break:clone;padding:1px 0}
+.s.hl{background:var(--mark);color:var(--mark-ink)}
+.hint{font-size:13px;color:var(--muted);background:var(--accent-bg);border-radius:10px;padding:8px 12px;margin:0 0 14px}
+.quote{font-family:var(--serif);font-size:16px;line-height:1.6;margin:8px 0 0;padding:2px 0}
+.note{margin-top:10px;font-size:15px}
+.note b{font-size:12px;color:var(--muted);display:block;font-weight:700}
+ul.ins{margin:6px 0 0;padding-left:18px;font-size:15px}
+ul.ins li{margin:4px 0}
+details{margin-top:10px}
+summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--accent);list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:'+ '}
+details[open] summary::before{content:'– '}
+.chk{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);font-size:15px;cursor:pointer}
+.chk:first-child{border-top:0}
+.chk input{width:20px;height:20px;margin-top:2px;accent-color:var(--accent);flex:none}
+.chk small{display:block;color:var(--muted);font-size:12px}
+.busy{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px;padding:10px 0}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--accent);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+.err{color:var(--danger);font-size:14px;margin-top:8px}
+.sticky{position:sticky;bottom:0;background:var(--bg);padding:12px 0 calc(8px + env(safe-area-inset-bottom,0px));margin-top:18px;border-top:1px solid var(--line)}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);font-size:14px;font-weight:600;padding:10px 16px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
+#toast.on{opacity:1}
+.filebtn{position:relative;overflow:hidden}
+.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.pinpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:280px;margin:20px auto 0}
+.pinpad button{aspect-ratio:1;border-radius:50%;font-size:20px;font-weight:600}
+.pindots{display:flex;gap:10px;justify-content:center;margin:24px 0}
+.pindots i{width:12px;height:12px;border-radius:50%;background:var(--line);display:block}
+.pindots i.on{background:var(--accent)}
+</style>
+</head>
+<body>
+<main id="app"><p class="sub">Opening Learning…</p></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
