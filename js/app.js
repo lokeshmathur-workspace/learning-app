@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=1";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=1";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=1";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=1";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
