@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=6";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=6";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=6";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=6";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=7";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=7";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS, BRIEF_TOPICS } from "./constants.js?v=7";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=7";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -29,6 +29,7 @@ const S = {
   fatal: "",
   fullCaptures: {}, // captureId -> full capture doc, for ready captures on the open source
   actionUI: {}, // captureId -> { picks: Set<index>, custom: [{action,pillar}] }
+  briefForm: null, // working copy of the open source's draftBrief while reviewing/editing it
 };
 
 function actionUIFor(capId) {
@@ -277,6 +278,7 @@ async function openSource(id) {
   S.meta = null;
   S.fullCaptures = {};
   S.actionUI = {};
+  S.briefForm = null;
   render();
   S.meta = await S.store.getSource(id);
   render();
@@ -419,6 +421,79 @@ function capCard(c) {
   return `<div class="card"><div class="row"><div class="kicker">${esc(label)} · ${fmtRelative(c.createdAt)}</div>${delBtn}</div>${body}</div>`;
 }
 
+// Builds an editable working copy of a routine-drafted brief the first
+// time a source's brief block renders it — plain fields for Lokesh to
+// tweak, never raw JSON, per plan Phase G's M7 design.
+function initBriefForm(draft, meta) {
+  return {
+    title: draft.title || meta.title || "",
+    author: draft.author || meta.author || "",
+    type: draft.type || meta.type,
+    dateProcessed: draft.dateProcessed || todayISO(),
+    topics: [...(draft.topics || [])],
+    principles: (draft.principles || []).map((p) => ({ title: p.title || "", explanation: p.explanation || "" })),
+    keyInsight: draft.keyInsight || "",
+    framework: draft.framework ? { name: draft.framework.name || "", steps: (draft.framework.steps || []).map((s) => ({ step: s.step || "", desc: s.desc || "" })) } : null,
+    connections: [...(draft.connections || [])],
+    actionItems: draft.actionItems || [],
+    retrievalQuestion: draft.retrievalQuestion || "",
+    speakingReady: draft.speakingReady !== false,
+  };
+}
+
+function briefBlock(meta) {
+  if (meta.briefId) {
+    return `<div class="block block-brief"><div class="block-label">Learning Brief</div><p class="sub" style="margin:0">✓ Saved to your library.</p></div>`;
+  }
+  if (!meta.draftBrief) {
+    return `<div class="btnrow"><button class="btn" data-act="createbrief" data-id="${meta.id}" ${S.busy === "brief" ? "disabled" : ""}>${S.busy === "brief" ? "Drafting…" : "Create learning brief"}</button></div>`;
+  }
+  if (!S.briefForm) S.briefForm = initBriefForm(meta.draftBrief, meta);
+  const f = S.briefForm;
+  const saving = S.busy === "savebrief";
+  return `<div class="block block-brief">
+  <div class="block-label">Learning Brief — Draft</div>
+  <p class="sub" style="margin:0 0 10px">Review and tweak before saving to your library.</p>
+  <label for="bf-title">Title</label><input id="bf-title" type="text" data-bf="title" value="${esc(f.title)}">
+  <label for="bf-author">Author</label><input id="bf-author" type="text" data-bf="author" value="${esc(f.author)}">
+  <label>Topics <small style="font-weight:400">(up to 3)</small></label>
+  <div class="seg">${BRIEF_TOPICS.map((t) => `<button class="btn" type="button" aria-pressed="${f.topics.includes(t)}" data-act="brieftopic" data-t="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+  <label>Principles</label>
+  ${f.principles
+    .map(
+      (p, i) =>
+        `<div class="reprow"><div><input type="text" data-bf="principle-title-${i}" value="${esc(p.title)}" placeholder="Principle"><textarea data-bf="principle-body-${i}" placeholder="Explanation" style="min-height:64px">${esc(p.explanation)}</textarea></div><button class="rm" data-act="rmprinciple" data-i="${i}" aria-label="Remove">×</button></div>`
+    )
+    .join("")}
+  <div class="btnrow"><button class="btn ghost" data-act="addprinciple" style="flex:0 1 auto">+ Add principle</button></div>
+  <label for="bf-ki">Key insight</label><textarea id="bf-ki" data-bf="keyInsight" style="min-height:80px">${esc(f.keyInsight)}</textarea>
+  <label class="chk" style="border-top:0;padding-top:0"><input type="checkbox" data-act="togglefw" ${f.framework ? "checked" : ""}><span>This source has its own named framework or model</span></label>
+  ${f.framework
+    ? `<div style="margin-top:8px">
+    <input type="text" data-bf="frameworkName" value="${esc(f.framework.name)}" placeholder="Framework name">
+    ${f.framework.steps
+      .map(
+        (st, i) =>
+          `<div class="reprow"><div><input type="text" data-bf="step-title-${i}" value="${esc(st.step)}" placeholder="Step"><textarea data-bf="step-desc-${i}" placeholder="What it means" style="min-height:56px">${esc(st.desc)}</textarea></div><button class="rm" data-act="rmstep" data-i="${i}" aria-label="Remove">×</button></div>`
+      )
+      .join("")}
+    <div class="btnrow"><button class="btn ghost" data-act="addstep" style="flex:0 1 auto">+ Add step</button></div>
+  </div>`
+    : ""}
+  <label>Connections</label>
+  ${f.connections
+    .map((c, i) => `<div class="reprow"><input type="text" data-bf="connection-${i}" value="${esc(c)}" placeholder="Links to another book, pillar, or idea"><button class="rm" data-act="rmconnection" data-i="${i}" aria-label="Remove">×</button></div>`)
+    .join("")}
+  <div class="btnrow"><button class="btn ghost" data-act="addconnection" style="flex:0 1 auto">+ Add connection</button></div>
+  ${f.actionItems.length ? `<label>Confirmed actions</label><ul class="ins">${f.actionItems.map((a) => `<li>${esc(a.action)} <span class="meta" style="margin:0">· ${esc(PILLARS[a.pillar] || a.pillar)}</span></li>`).join("")}</ul>` : ""}
+  <label for="bf-rq">Retrieval question</label><input id="bf-rq" type="text" data-bf="retrievalQuestion" value="${esc(f.retrievalQuestion)}">
+  <label class="chk" style="border-top:0;padding-top:0"><input type="checkbox" data-bf="speakingReady" ${f.speakingReady ? "checked" : ""}><span>Ready to speak or write about this</span></label>
+  <div class="btnrow" style="margin-top:14px">
+    <button class="btn ghost" data-act="discardbrief" data-id="${meta.id}" style="flex:0 1 auto">Discard draft</button>
+    <button class="btn primary" data-act="savebrief" data-id="${meta.id}" style="flex:1 1 auto" ${saving ? "disabled" : ""}>${saving ? "Saving…" : "Confirm & save to library"}</button>
+  </div></div>`;
+}
+
 function vSource() {
   const s = S.sources.find((x) => x.id === S.curId);
   const meta = S.meta;
@@ -435,6 +510,7 @@ function vSource() {
   </div>
   ${hasPending ? `<div class="btnrow"><button class="btn" data-act="processnow" data-id="${s.id}" ${S.busy === "process" ? "disabled" : ""}>${S.busy === "process" ? "Processing…" : "Process now"}</button></div>` : ""}
   <div class="btnrow">${meta.status === "finished" ? `<button class="btn" data-act="reopen" data-id="${s.id}">Mark reading</button>` : `<button class="btn" data-act="finish" data-id="${s.id}">${isBook ? "Finished book" : "Mark done"}</button>`}</div>
+  ${(meta.captures || []).length ? briefBlock(meta) : ""}
   <h2>Notes <small>${(meta.captures || []).length || ""}</small></h2>
   ${(meta.captures || []).length ? meta.captures.slice().reverse().map(capCard).join("") : `<div class="empty">${isBook ? "Photograph a page or jot a thought to make your first note." : "Add a thought or paste text to capture what you learned."}</div>`}
   <div class="btnrow" style="margin-top:30px"><button class="btn ghost danger" data-act="delsrc" style="flex:0 1 auto">${S.delArm === "src" ? "Tap again to delete this and all its notes" : "Delete"}</button></div>`;
@@ -519,6 +595,75 @@ async function processNow(sourceId) {
     toast(e instanceof RoutineError ? e.message : "Couldn't start processing.");
   }
   S.busy = "";
+  render();
+}
+
+async function startBriefDraft(sourceId) {
+  S.busy = "brief";
+  render();
+  try {
+    await fireRoutine(`draft brief ${sourceId}`);
+    toast("Drafting your brief — usually a minute or two. Reopen this book to see it.");
+  } catch (e) {
+    toast(e instanceof RoutineError ? e.message : "Couldn't start drafting.");
+  }
+  S.busy = "";
+  render();
+}
+
+async function discardBrief(sourceId) {
+  const ok = await S.store.discardDraftBrief(sourceId);
+  if (!ok) {
+    toast("Couldn't discard — try again.");
+    return;
+  }
+  S.briefForm = null;
+  S.meta = await S.store.getSource(sourceId);
+  toast("Draft discarded.");
+  render();
+}
+
+async function saveBrief(sourceId) {
+  const f = S.briefForm;
+  if (!f.title.trim()) {
+    toast("Add a title first.");
+    return;
+  }
+  if (!f.principles.some((p) => p.title.trim())) {
+    toast("Add at least one principle first.");
+    return;
+  }
+  S.busy = "savebrief";
+  render();
+  const briefFields = {
+    title: f.title.trim(),
+    author: f.author.trim(),
+    type: f.type,
+    dateProcessed: f.dateProcessed,
+    topics: f.topics,
+    principles: f.principles.filter((p) => p.title.trim()).map((p) => ({ title: p.title.trim(), explanation: p.explanation.trim() })),
+    keyInsight: f.keyInsight.trim(),
+    ...(f.framework && f.framework.name.trim()
+      ? { framework: { name: f.framework.name.trim(), steps: f.framework.steps.filter((st) => st.step.trim()).map((st) => ({ step: st.step.trim(), desc: st.desc.trim() })) } }
+      : {}),
+    connections: f.connections.map((c) => c.trim()).filter(Boolean),
+    actionItems: f.actionItems,
+    retrievalQuestion: f.retrievalQuestion.trim(),
+    speakingReady: !!f.speakingReady,
+    reviewHistory: [],
+  };
+  const ok = await S.store.confirmBrief(sourceId, briefFields);
+  S.busy = "";
+  if (!ok) {
+    toast("Couldn't save — try again.");
+    render();
+    return;
+  }
+  toast("Brief saved to your library.");
+  S.briefForm = null;
+  S.meta = await S.store.getSource(sourceId);
+  const idx = await S.store.getIndex();
+  S.sources = idx.sources;
   render();
 }
 
@@ -635,11 +780,26 @@ function render() {
 /* ---------- events ---------- */
 document.addEventListener("input", (e) => {
   const f = e.target.dataset.f;
-  if (!f) return;
-  if (S.view === "auth" && S.form) S.form[f] = e.target.value;
-  else if (S.view === "new" && S.form) S.form[f] = e.target.value;
-  else if (S.view === "capture" && S.draft) S.draft[f] = e.target.value;
-  else if (S.view === "settings" && S.settingsForm) S.settingsForm[f] = e.target.value;
+  if (f) {
+    if (S.view === "auth" && S.form) S.form[f] = e.target.value;
+    else if (S.view === "new" && S.form) S.form[f] = e.target.value;
+    else if (S.view === "capture" && S.draft) S.draft[f] = e.target.value;
+    else if (S.view === "settings" && S.settingsForm) S.settingsForm[f] = e.target.value;
+    return;
+  }
+  const bf = e.target.dataset.bf;
+  if (!bf || S.view !== "source" || !S.briefForm) return;
+  const fw = S.briefForm.framework;
+  if (bf === "title") S.briefForm.title = e.target.value;
+  else if (bf === "author") S.briefForm.author = e.target.value;
+  else if (bf === "keyInsight") S.briefForm.keyInsight = e.target.value;
+  else if (bf === "retrievalQuestion") S.briefForm.retrievalQuestion = e.target.value;
+  else if (bf === "frameworkName" && fw) fw.name = e.target.value;
+  else if (bf.startsWith("principle-title-")) S.briefForm.principles[+bf.split("-")[2]].title = e.target.value;
+  else if (bf.startsWith("principle-body-")) S.briefForm.principles[+bf.split("-")[2]].explanation = e.target.value;
+  else if (bf.startsWith("connection-")) S.briefForm.connections[+bf.split("-")[1]] = e.target.value;
+  else if (bf.startsWith("step-title-") && fw) fw.steps[+bf.split("-")[2]].step = e.target.value;
+  else if (bf.startsWith("step-desc-") && fw) fw.steps[+bf.split("-")[2]].desc = e.target.value;
 });
 
 document.addEventListener("change", async (e) => {
@@ -656,6 +816,15 @@ document.addEventListener("change", async (e) => {
     if (e.target.checked) ui.picks.add(i);
     else ui.picks.delete(i);
     render();
+    return;
+  }
+  if (S.view === "source" && S.briefForm) {
+    if (e.target.dataset.act === "togglefw") {
+      S.briefForm.framework = e.target.checked ? { name: "", steps: [{ step: "", desc: "" }] } : null;
+      render();
+    } else if (e.target.dataset.bf === "speakingReady") {
+      S.briefForm.speakingReady = e.target.checked;
+    }
   }
 });
 
@@ -723,6 +892,52 @@ document.addEventListener("click", async (e) => {
       break;
     case "processnow":
       await processNow(b.dataset.id);
+      break;
+    case "createbrief":
+      await startBriefDraft(b.dataset.id);
+      break;
+    case "brieftopic": {
+      const t = b.dataset.t;
+      const topics = S.briefForm.topics;
+      const i = topics.indexOf(t);
+      if (i >= 0) topics.splice(i, 1);
+      else if (topics.length < 3) topics.push(t);
+      else {
+        toast("Up to 3 topics.");
+        break;
+      }
+      render();
+      break;
+    }
+    case "addprinciple":
+      S.briefForm.principles.push({ title: "", explanation: "" });
+      render();
+      break;
+    case "rmprinciple":
+      S.briefForm.principles.splice(parseInt(b.dataset.i, 10), 1);
+      render();
+      break;
+    case "addconnection":
+      S.briefForm.connections.push("");
+      render();
+      break;
+    case "rmconnection":
+      S.briefForm.connections.splice(parseInt(b.dataset.i, 10), 1);
+      render();
+      break;
+    case "addstep":
+      S.briefForm.framework.steps.push({ step: "", desc: "" });
+      render();
+      break;
+    case "rmstep":
+      S.briefForm.framework.steps.splice(parseInt(b.dataset.i, 10), 1);
+      render();
+      break;
+    case "discardbrief":
+      await discardBrief(b.dataset.id);
+      break;
+    case "savebrief":
+      await saveBrief(b.dataset.id);
       break;
     case "finish":
     case "reopen": {

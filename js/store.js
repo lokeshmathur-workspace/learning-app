@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=6";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=6";
-import { prepPhotoBatch } from "./photo.js?v=6";
-import { nowStamp, todayISO } from "./dateutil.js?v=6";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=6";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=7";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=7";
+import { prepPhotoBatch } from "./photo.js?v=7";
+import { nowStamp, todayISO } from "./dateutil.js?v=7";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=7";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";
@@ -582,6 +582,17 @@ export class Store {
     const doc = json || { _readme: "Lokesh's personal knowledge library. Written by the LifeOS Learning project. Never edited manually. Each entry is a Learning Brief from a book, article, video, podcast, or course.", _lastUpdated: "", _totalBriefs: 0, briefs: [] };
     this.library = { doc, sha };
     return doc;
+  }
+
+  // Clears a routine-drafted brief without saving it, so Lokesh can fire
+  // "Create learning brief" again for a fresh draft.
+  async discardDraftBrief(sourceId) {
+    const meta = await this.getSource(sourceId);
+    if (!meta) return false;
+    const newMeta = { ...meta };
+    delete newMeta.draftBrief;
+    this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
+    return this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: ${sourceId} discard draft brief`, true);
   }
 
   async confirmBrief(sourceId, briefFields) {

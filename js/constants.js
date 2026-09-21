@@ -40,3 +40,7 @@ export const SOURCE_STATUS = {
   ACTIVE: "active",
   FINISHED: "finished",
 };
+
+// Learning brief topic tags — see learning/CLAUDE.md's Mode 2 (draft a
+// brief) instructions for the exact allowed set.
+export const BRIEF_TOPICS = ["🧠 Self-Dev", "🤖 AI & Tech", "👑 Leadership", "🤝 People", "🚀 Entrepreneurship", "📚 Other"];
