@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=2";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=2";
-import { prepPhotoBatch } from "./photo.js?v=2";
-import { nowStamp, todayISO } from "./dateutil.js?v=2";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=2";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=3";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=3";
+import { prepPhotoBatch } from "./photo.js?v=3";
+import { nowStamp, todayISO } from "./dateutil.js?v=3";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=3";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";
@@ -159,7 +159,8 @@ export class Store {
   // deliberate one-shot action, not something to debounce).
   async createSource(fields) {
     const idx = await this.getIndex();
-    const id = nextSourceId(idx.sources);
+    const lib = await this.getLibrary();
+    const id = nextSourceId(idx.sources, lib.briefs.map((b) => b.id));
     const meta = defaultMeta(id, fields);
     this.sources.set(id, { doc: meta, sha: null });
     const ok = await this._writeFile(

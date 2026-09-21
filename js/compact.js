@@ -65,15 +65,23 @@ export function compact(doc, indent = 2) {
 
 // --- ID generation, per learning/CLAUDE.md's Routine Processing Instructions ---
 // Source id = "LB" + zero-padded sequential number, reserved at source
-// creation (see plan Phase G decision #4). Scans sources/index.json's rows
-// for the highest LB number in use so a new one never collides, even with a
-// gap left by a deleted-before-brief source.
+// creation (see plan Phase G decision #4). Scans BOTH sources/index.json's
+// rows and library.json's existing briefs[] ids for the highest LB number in
+// use, so a new one never collides — these are two independent id sequences
+// (library.json predates this app's sources/index.json entirely) that must
+// still share one number line. A real collision from exactly this gap
+// happened during M4 testing (a test source landed on LB001, already used
+// by a pre-existing real brief) before this fix.
 const LB_RE = /^LB(\d{3})$/;
 
-export function nextSourceId(sourceRows) {
+export function nextSourceId(sourceRows, libraryBriefIds) {
   let maxN = 0;
   for (const row of sourceRows || []) {
     const m = row && typeof row.id === "string" && row.id.match(LB_RE);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  for (const id of libraryBriefIds || []) {
+    const m = typeof id === "string" && id.match(LB_RE);
     if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
   }
   return `LB${String(maxN + 1).padStart(3, "0")}`;
