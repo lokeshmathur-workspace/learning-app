@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=1";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=1";
-import { prepPhotoBatch } from "./photo.js?v=1";
-import { nowStamp, todayISO } from "./dateutil.js?v=1";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=1";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=2";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=2";
+import { prepPhotoBatch } from "./photo.js?v=2";
+import { nowStamp, todayISO } from "./dateutil.js?v=2";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=2";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";
@@ -378,6 +378,54 @@ export class Store {
     });
     if (kept.length !== q.items.length || kept.some((item, i) => item !== q.items[i])) {
       await this.saveQueue(kept, true);
+    }
+    return true;
+  }
+
+  // Deletes one note/page/link within a source (FR-3's per-card delete,
+  // added after Lokesh's testing flagged only whole-source delete existed).
+  // Same rules as deleteSource, scoped to this one capture: its own file,
+  // any inbox photos it still references (an unprocessed pending page),
+  // removal from meta.json/index.json's projections, and removal of any of
+  // its actionIds that are still pending in queue.json.
+  async deleteCapture(sourceId, captureId) {
+    const meta = await this.getSource(sourceId);
+    if (!meta) return true;
+    const row = (meta.captures || []).find((c) => c.id === captureId);
+    const full = await this.getCapture(sourceId, captureId);
+
+    const { sha } = await this.gh.getFile(capturePath(sourceId, captureId));
+    if (sha) await this.gh.deleteFile(capturePath(sourceId, captureId), sha, `learning: delete ${sourceId}/${captureId}`);
+
+    for (const p of (full && full.photos) || []) {
+      try {
+        const { sha: psha } = await this.gh.getFile(p);
+        if (psha) await this.gh.deleteFile(p, psha, `learning: delete orphaned photo`);
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    const newMeta = { ...meta, captures: (meta.captures || []).filter((c) => c.id !== captureId), updatedAt: new Date().toISOString() };
+    this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
+    await this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: ${sourceId} remove ${captureId}`, true);
+    const idx = await this.getIndex();
+    await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+    this.captures.delete(`${sourceId}/${captureId}`);
+
+    const actionIds = (row && row.actionIds) || (full && full.confirmedActions) || [];
+    if (actionIds.length) {
+      const q = await this.getQueue();
+      let changed = false;
+      const kept = q.items
+        .map((item) => {
+          const before = (item.actionItems || []).length;
+          item.actionItems = (item.actionItems || []).filter((a) => !(actionIds.includes(a.actionId) && a.status === QUEUE_ACTION_STATUS.PENDING));
+          if (item.actionItems.length !== before) changed = true;
+          return item;
+        })
+        .filter((item) => item.actionItems.length > 0);
+      if (changed) await this.saveQueue(kept, true);
     }
     return true;
   }

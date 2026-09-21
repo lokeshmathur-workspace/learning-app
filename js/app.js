@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=1";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=1";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=1";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=1";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=2";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=2";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=2";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=2";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -275,18 +275,20 @@ async function openSource(id) {
 
 function capCard(c) {
   const label = c.type === "page" ? (c.pages || []).map((p) => (p.page ? "p. " + p.page : "page")).join(", ") : c.type === "link" ? "Summary" : "Thought" + (c.pageRef ? " · p. " + c.pageRef : "");
+  const armed = S.delArm === `cap:${c.id}`;
+  const delBtn = `<button class="btn ghost danger" data-act="delcap" data-cid="${c.id}" style="min-height:30px">${armed ? "Confirm" : "Delete"}</button>`;
   const pending = [CAPTURE_STATUS.PENDING_TRANSCRIPTION, CAPTURE_STATUS.PENDING_SUMMARY].includes(c.status);
   if (pending) {
     return `<div class="card" style="border-style:dashed">
-      <div class="row"><div class="kicker">${esc(label)}</div><span class="pill">Pending</span></div>
+      <div class="row"><div class="kicker">${esc(label)}</div><div style="display:flex;gap:6px;align-items:center"><span class="pill">Pending</span>${delBtn}</div></div>
       <p class="sub" style="margin-top:8px">Saved to your library. Tap <b>Process now</b> below to transcribe/summarize it.</p></div>`;
   }
   if (c.status === CAPTURE_STATUS.NEEDS_RETAKE) {
-    return `<div class="card"><div class="row"><div class="kicker">${esc(label)}</div><span class="pill">Couldn't read this</span></div>
+    return `<div class="card"><div class="row"><div class="kicker">${esc(label)}</div><div style="display:flex;gap:6px;align-items:center"><span class="pill">Couldn't read this</span>${delBtn}</div></div>
       <p class="sub" style="margin-top:8px">No usable text came back from this photo. Retake it with better lighting.</p></div>`;
   }
   if (c.status === CAPTURE_STATUS.NEEDS_TEXT) {
-    return `<div class="card"><div class="row"><div class="kicker">${esc(label)}</div><span class="pill">Needs text</span></div>
+    return `<div class="card"><div class="row"><div class="kicker">${esc(label)}</div><div style="display:flex;gap:6px;align-items:center"><span class="pill">Needs text</span>${delBtn}</div></div>
       <p class="sub" style="margin-top:8px">Couldn't fetch that link. Paste the transcript or key points to summarize it.</p></div>`;
   }
   let body = "";
@@ -294,7 +296,7 @@ function capCard(c) {
   if (c.note) body += `<div class="note"><b>My note</b>${esc(c.note)}</div>`;
   if ((c.actionIds || []).length) body += `<div class="note"><b>Actions</b><p class="sub">${c.actionIds.length} confirmed</p></div>`;
   if (c.needsInsights) body += `<p class="sub" style="margin-top:8px">Insights pending — tap Process now.</p>`;
-  return `<div class="card"><div class="kicker">${esc(label)} · ${fmtRelative(c.createdAt)}</div>${body}</div>`;
+  return `<div class="card"><div class="row"><div class="kicker">${esc(label)} · ${fmtRelative(c.createdAt)}</div>${delBtn}</div>${body}</div>`;
 }
 
 function vSource() {
@@ -463,7 +465,7 @@ document.addEventListener("click", async (e) => {
   if (!b) return;
   const a = b.dataset.act;
   if (b.tagName === "LABEL" && b.querySelector("input[type=file]")) return;
-  if (a !== "delsrc") S.delArm = null;
+  if (a !== "delsrc" && a !== "delcap") S.delArm = null;
   switch (a) {
     case "connect":
       await connect();
@@ -544,6 +546,22 @@ document.addEventListener("click", async (e) => {
       S.view = "home";
       render();
       await loadHome();
+      break;
+    }
+    case "delcap": {
+      const cid = b.dataset.cid;
+      const key = `cap:${cid}`;
+      if (S.delArm !== key) {
+        S.delArm = key;
+        return render();
+      }
+      S.delArm = null;
+      await S.store.deleteCapture(S.curId, cid);
+      toast("Note deleted.");
+      S.meta = await S.store.getSource(S.curId);
+      const idx = await S.store.getIndex();
+      S.sources = idx.sources;
+      render();
       break;
     }
   }
