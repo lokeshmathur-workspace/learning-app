@@ -337,8 +337,16 @@ async function processNow(sourceId) {
 function vCapture() {
   const d = S.draft;
   const s = S.sources.find((x) => x.id === d.srcId) || { title: "" };
+  if (d.mode === "page") {
+    return `<button class="btn ghost back" data-act="cancelcap">‹ ${esc(s.title)}</button><h1>Add page</h1>
+    <p class="sub" style="margin:10px 0 16px">Take a photo of the page, or pick up to 4 pages from your photos. Up to 4 pages upload together and process as one note.</p>
+    ${S.busy === "upload"
+      ? `<div class="busy"><span class="dot"></span>Uploading…</div>`
+      : `<label class="btn primary filebtn" style="width:100%;margin:0">Take or choose photos<input type="file" accept="image/*" multiple data-act="photos" aria-label="Take or choose photos"></label>`}
+    ${d.err ? `<p class="err">${esc(d.err)}</p>` : ""}`;
+  }
   if (d.mode !== "thought") {
-    return `<button class="btn ghost back" data-act="cancelcap">‹ ${esc(s.title)}</button><h1>Coming soon</h1><p class="sub" style="margin-top:10px">Page-photo capture lands in the next update — Add thought already works.</p>`;
+    return `<button class="btn ghost back" data-act="cancelcap">‹ ${esc(s.title)}</button><h1>Coming soon</h1><p class="sub" style="margin-top:10px">This capture type lands in a later update — Add page and Add thought already work.</p>`;
   }
   return `<button class="btn ghost back" data-act="cancelcap">‹ ${esc(s.title)}</button><h1>Add a thought</h1>
   <label for="c-thought">Your thought</label><textarea id="c-thought" data-f="thought" style="min-height:140px" placeholder="What struck you, and why it matters">${esc(d.thought)}</textarea>
@@ -346,6 +354,26 @@ function vCapture() {
   <label for="c-note">Your note</label><textarea id="c-note" data-f="note" placeholder="Optional — anything to add">${esc(d.note)}</textarea>
   ${d.err ? `<p class="err">${esc(d.err)}</p>` : ""}
   <div class="sticky"><button class="btn primary" style="width:100%" data-act="savethought" ${S.busy ? "disabled" : ""}>Save note</button></div>`;
+}
+
+async function uploadPagePhotos(files) {
+  const d = S.draft;
+  if (files.length > 4) {
+    toast("Using the first 4 photos.");
+    files = files.slice(0, 4);
+  }
+  S.busy = "upload";
+  d.err = "";
+  render();
+  const result = await S.store.uploadPagePhotos(d.srcId, files);
+  S.busy = "";
+  if (!result.ok) {
+    d.err = result.error;
+    return render();
+  }
+  toast(`${files.length} photo${files.length > 1 ? "s" : ""} saved — waiting for processing.`);
+  S.draft = null;
+  await openSource(d.srcId);
 }
 
 async function saveThought() {
@@ -420,6 +448,14 @@ document.addEventListener("input", (e) => {
   else if (S.view === "new" && S.form) S.form[f] = e.target.value;
   else if (S.view === "capture" && S.draft) S.draft[f] = e.target.value;
   else if (S.view === "settings" && S.settingsForm) S.settingsForm[f] = e.target.value;
+});
+
+document.addEventListener("change", async (e) => {
+  if (e.target.dataset.act === "photos" && e.target.files && e.target.files.length) {
+    const files = Array.from(e.target.files);
+    e.target.value = "";
+    await uploadPagePhotos(files);
+  }
 });
 
 document.addEventListener("click", async (e) => {
