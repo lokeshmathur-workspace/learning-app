@@ -1,0 +1,7 @@
+name = "learning-routine-proxy"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# No secrets here — this Worker never stores the routine's bearer token.
+# It only relays it from the browser to Anthropic and adds a CORS header
+# on the way back. See worker.js's top comment for why it exists.
