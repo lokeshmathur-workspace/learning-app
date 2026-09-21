@@ -5,7 +5,7 @@
 import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js";
 import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js";
 import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js";
-import { fmtRelative, todayISO } from "./dateutil.js";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -186,7 +186,7 @@ function vHome() {
           .join("")}</div>`
       : "";
 
-  return `<div class="top"><div><h1>Learning</h1><div class="sub">${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div></div>
+  return `<div class="top"><div><h1>Learning</h1><div class="sub">${prettyDate(todayISO())}</div></div>
   <button class="btn ghost" data-act="settings" style="flex:0 1 auto">Settings</button></div>
   <div class="stats"><div class="stat"><b>${captures}</b><span>Captures</span></div>
   <button class="stat" data-act="actions"><b>${openActions}</b><span>Actions pending</span></button></div>
