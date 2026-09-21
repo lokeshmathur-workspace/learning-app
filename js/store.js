@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=5";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=5";
-import { prepPhotoBatch } from "./photo.js?v=5";
-import { nowStamp, todayISO } from "./dateutil.js?v=5";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=5";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=6";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=6";
+import { prepPhotoBatch } from "./photo.js?v=6";
+import { nowStamp, todayISO } from "./dateutil.js?v=6";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=6";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";
@@ -447,6 +447,25 @@ export class Store {
     const doc = { items };
     this.queue = { doc, sha: cur.sha };
     return this._writeFile(QUEUE_PATH, doc, () => this.queue, (n) => (this.queue = n), "learning: update queue", immediate);
+  }
+
+  // Removes a task from view without deleting it (learning/CLAUDE.md rule:
+  // "A dismissed action stays in the queue with status: 'dismissed'; don't
+  // delete it") — same convention already used for Life OS's own queue
+  // lifecycle, just triggered here instead of from /today.
+  async dismissAction(actionId) {
+    const q = await this.getQueue();
+    let found = false;
+    for (const item of q.items) {
+      const a = (item.actionItems || []).find((x) => x.actionId === actionId);
+      if (a) {
+        a.status = QUEUE_ACTION_STATUS.DISMISSED;
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+    return this.saveQueue(q.items, true);
   }
 
   // Appends ticked actions (suggested + any custom ones) to queue.json,

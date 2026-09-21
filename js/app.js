@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=5";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=5";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=5";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=5";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=6";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=6";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=6";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=6";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -175,7 +175,7 @@ function vHome() {
   const actionsByType = {};
   let openActions = 0;
   for (const it of S.queue.items || []) {
-    const n = (it.actionItems || []).filter((a) => a.status !== QUEUE_ACTION_STATUS.DONE).length;
+    const n = (it.actionItems || []).filter((a) => a.status !== QUEUE_ACTION_STATUS.DONE && a.status !== QUEUE_ACTION_STATUS.DISMISSED).length;
     openActions += n;
     if (n) {
       const label = TYPE_LABEL[it.sourceType] || "Other";
@@ -336,7 +336,9 @@ function insightsHTML(full) {
 }
 
 function actionsHTML(full, capId) {
-  const confirmed = (full.confirmedActions || []).map((id) => ({ id, a: queueAction(id) }));
+  const confirmed = (full.confirmedActions || [])
+    .map((id) => ({ id, a: queueAction(id) }))
+    .filter(({ a }) => !a || a.status !== QUEUE_ACTION_STATUS.DISMISSED);
   const suggested = full.suggestedActions || [];
   const ui = actionUIFor(capId);
   if (!confirmed.length && !suggested.length && !ui.custom.length) return "";
@@ -345,7 +347,10 @@ function actionsHTML(full, capId) {
   let h = `<div class="block block-actions"><div class="block-label">Actions</div>`;
   if (confirmed.length) {
     h += confirmed
-      .map(({ id, a }) => `<div class="confirmedrow">${esc(a ? a.action : id)}${a ? ` <span class="meta" style="margin:0">· ${esc(PILLARS[a.pillar] || a.pillar)}</span>` : ""}</div>`)
+      .map(
+        ({ id, a }) =>
+          `<div class="confirmedrow"><span style="flex:1 1 auto">${esc(a ? a.action : id)}${a ? ` <span class="meta" style="margin:0">· ${esc(PILLARS[a.pillar] || a.pillar)}</span>` : ""}</span><button class="rm" data-act="dismissaction" data-id="${id}" aria-label="Delete task">×</button></div>`
+      )
       .join("");
   }
   if (suggested.length || ui.custom.length) {
@@ -488,6 +493,21 @@ async function saveActionsFor(capId) {
   render();
 }
 
+// Removes a task from the Open list without deleting it — sets status
+// "dismissed" (per learning/CLAUDE.md's rule: a dismissed action stays in
+// the queue, it's never actually deleted), so it drops out of every open
+// count/list but the record (and its id) is still there in queue.json.
+async function dismissAction(actionId) {
+  const ok = await S.store.dismissAction(actionId);
+  if (!ok) {
+    toast("Couldn't remove — try again.");
+    return;
+  }
+  toast("Task removed.");
+  S.queue = await S.store.getQueue();
+  render();
+}
+
 async function processNow(sourceId) {
   S.busy = "process";
   render();
@@ -593,13 +613,15 @@ function forgetAll() {
 
 /* ---------- Actions (FR-7, thin version — full ticking UI lands with M6) ---------- */
 function vActions() {
-  const open = (S.queue.items || []).flatMap((it) => (it.actionItems || []).filter((a) => a.status !== QUEUE_ACTION_STATUS.DONE).map((a) => ({ ...a, srcTitle: it.title })));
+  const isOpen = (a) => a.status !== QUEUE_ACTION_STATUS.DONE && a.status !== QUEUE_ACTION_STATUS.DISMISSED;
+  const open = (S.queue.items || []).flatMap((it) => (it.actionItems || []).filter(isOpen).map((a) => ({ ...a, srcTitle: it.title })));
   const done = (S.queue.items || []).flatMap((it) => (it.actionItems || []).filter((a) => a.status === QUEUE_ACTION_STATUS.DONE).map((a) => ({ ...a, srcTitle: it.title })));
   const statusLabel = (a) => (a.status === QUEUE_ACTION_STATUS.ACCEPTED ? "In Life OS" : a.status === QUEUE_ACTION_STATUS.DONE ? "Done" : "Waiting for /today");
-  const item = (a) => `<div class="chk" style="cursor:default"><span>${a.status === QUEUE_ACTION_STATUS.DONE ? "✓" : "○"}</span><span>${esc(a.action)}<small>${esc(PILLARS[a.pillar] || a.pillar)} · ${esc(a.srcTitle || "")} · ${statusLabel(a)}</small></span></div>`;
+  const openItem = (a) => `<div class="chk" style="cursor:default"><span>○</span><span style="flex:1 1 auto">${esc(a.action)}<small>${esc(PILLARS[a.pillar] || a.pillar)} · ${esc(a.srcTitle || "")} · ${statusLabel(a)}</small></span><button class="rm" data-act="dismissaction" data-id="${a.actionId}" aria-label="Delete task">×</button></div>`;
+  const doneItem = (a) => `<div class="chk" style="cursor:default"><span>✓</span><span>${esc(a.action)}<small>${esc(PILLARS[a.pillar] || a.pillar)} · ${esc(a.srcTitle || "")} · ${statusLabel(a)}</small></span></div>`;
   return `<button class="btn ghost back" data-act="home">‹ Library</button><h1>Actions</h1>
-  <h2>Open <small>${open.length || ""}</small></h2>${open.length ? `<div class="card">${open.map(item).join("")}</div>` : `<div class="empty">No open actions. Actions you tick when saving a note land here.</div>`}
-  ${done.length ? `<h2>Recently done</h2><div class="card">${done.slice(-15).reverse().map(item).join("")}</div>` : ""}`;
+  <h2>Open <small>${open.length || ""}</small></h2>${open.length ? `<div class="card">${open.map(openItem).join("")}</div>` : `<div class="empty">No open actions. Actions you tick when saving a note land here.</div>`}
+  ${done.length ? `<h2>Recently done</h2><div class="card">${done.slice(-15).reverse().map(doneItem).join("")}</div>` : ""}`;
 }
 
 /* ---------- render dispatch ---------- */
@@ -736,6 +758,9 @@ document.addEventListener("click", async (e) => {
       break;
     case "saveactions":
       await saveActionsFor(b.dataset.cid);
+      break;
+    case "dismissaction":
+      await dismissAction(b.dataset.id);
       break;
     case "delcap": {
       const cid = b.dataset.cid;
