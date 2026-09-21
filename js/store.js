@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=3";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=3";
-import { prepPhotoBatch } from "./photo.js?v=3";
-import { nowStamp, todayISO } from "./dateutil.js?v=3";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=3";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=4";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=4";
+import { prepPhotoBatch } from "./photo.js?v=4";
+import { nowStamp, todayISO } from "./dateutil.js?v=4";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=4";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";
@@ -496,6 +496,61 @@ export class Store {
       });
     }
     await this.saveQueue(q.items, true);
+    return newIds;
+  }
+
+  // Patches a capture's highlights[] only — tap-to-highlight in the reader.
+  async saveHighlights(sourceId, captureId, highlights) {
+    const key = `${sourceId}/${captureId}`;
+    const cur = this.captures.get(key);
+    if (!cur) return false;
+    const doc = { ...cur.doc, highlights };
+    this.captures.set(key, { doc, sha: cur.sha });
+    return this._writeFile(capturePath(sourceId, captureId), doc, () => this.captures.get(key), (n) => this.captures.set(key, n), `learning: ${sourceId}/${captureId} highlights`, true);
+  }
+
+  // Patches a capture's note only.
+  async saveCaptureNote(sourceId, captureId, note) {
+    const key = `${sourceId}/${captureId}`;
+    const cur = this.captures.get(key);
+    if (!cur) return false;
+    const doc = { ...cur.doc, note };
+    this.captures.set(key, { doc, sha: cur.sha });
+    return this._writeFile(capturePath(sourceId, captureId), doc, () => this.captures.get(key), (n) => this.captures.set(key, n), `learning: ${sourceId}/${captureId} note`, true);
+  }
+
+  // Ticking actions on a specific capture: writes queue.json via
+  // confirmActions() (unchanged), then — the part confirmActions() alone
+  // doesn't do — records the new ids on the capture file's confirmedActions[]
+  // and on meta.json's light row actionIds[], so a confirmed action shows as
+  // confirmed everywhere (and so delete-cascade logic, which reads exactly
+  // these two fields, can find it later). Returns the new action ids.
+  async confirmCaptureActions(sourceId, captureId, sourceMeta, actions) {
+    const newIds = await this.confirmActions(sourceId, sourceMeta, actions);
+    if (!newIds.length) return newIds;
+
+    const key = `${sourceId}/${captureId}`;
+    const cap = this.captures.get(key);
+    if (cap) {
+      const doc = { ...cap.doc, confirmedActions: [...(cap.doc.confirmedActions || []), ...newIds] };
+      this.captures.set(key, { doc, sha: cap.sha });
+      await this._writeFile(capturePath(sourceId, captureId), doc, () => this.captures.get(key), (n) => this.captures.set(key, n), `learning: ${sourceId}/${captureId} confirm actions`, true);
+    }
+
+    const meta = await this.getSource(sourceId);
+    if (meta) {
+      const newMeta = {
+        ...meta,
+        captures: (meta.captures || []).map((c) =>
+          c.id === captureId ? { ...c, actionIds: [...(c.actionIds || []), ...newIds] } : c
+        ),
+        updatedAt: new Date().toISOString(),
+      };
+      this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
+      await this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: ${sourceId} confirm actions`, true);
+      const idx = await this.getIndex();
+      await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+    }
     return newIds;
   }
 

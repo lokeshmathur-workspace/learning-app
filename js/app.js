@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=3";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=3";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=3";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=3";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=4";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=4";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=4";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=4";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -27,7 +27,14 @@ const S = {
   busy: "",
   err: "",
   fatal: "",
+  fullCaptures: {}, // captureId -> full capture doc, for ready captures on the open source
+  actionUI: {}, // captureId -> { picks: Set<index>, custom: [{action,pillar}] }
 };
+
+function actionUIFor(capId) {
+  if (!S.actionUI[capId]) S.actionUI[capId] = { picks: new Set(), custom: [] };
+  return S.actionUI[capId];
+}
 
 function toast(msg) {
   const t = $("#toast");
@@ -268,9 +275,99 @@ async function openSource(id) {
   S.curId = id;
   S.view = "source";
   S.meta = null;
+  S.fullCaptures = {};
+  S.actionUI = {};
   render();
   S.meta = await S.store.getSource(id);
   render();
+  // meta.json's captures[] is a light projection (no transcript/insights/
+  // suggestedActions) — fetch each ready capture's full file so capCard()
+  // can actually show its content, per plan Phase G's M6 addendum.
+  const ready = (S.meta?.captures || []).filter((c) => c.status === CAPTURE_STATUS.READY);
+  await Promise.all(
+    ready.map(async (c) => {
+      const full = await S.store.getCapture(id, c.id);
+      if (full) S.fullCaptures[c.id] = full;
+    })
+  );
+  if (S.view === "source" && S.curId === id) render();
+}
+
+// Resolves a queue actionId to its human-readable text/pillar, for showing
+// already-confirmed actions by content rather than just their id — cross-
+// referencing S.queue (already loaded at app level), not a new fetch.
+function queueAction(actionId) {
+  for (const item of S.queue.items || []) {
+    const a = (item.actionItems || []).find((x) => x.actionId === actionId);
+    if (a) return a;
+  }
+  return null;
+}
+
+function pagesHTML(full, capId) {
+  const set = new Set((full.highlights || []).map((h) => `${h.page}.${h.para}.${h.sentence}`));
+  return (full.pages || [])
+    .map((pg, pi) => {
+      const pageLabel = pg.page ? `<div class="pgno">Page ${esc(pg.page)}</div>` : "";
+      const paras = (pg.paragraphs || [])
+        .map(
+          (pa, ai) =>
+            "<p>" +
+            (pa.sentences || [])
+              .map((s, si) => {
+                const on = set.has(`${pi}.${ai}.${si}`);
+                return `<span class="s${on ? " hl" : ""}" role="button" tabindex="0" aria-pressed="${on}" data-act="hl" data-cid="${capId}" data-pi="${pi}" data-ai="${ai}" data-si="${si}">${esc(s)}</span> `;
+              })
+              .join("") +
+            "</p>"
+        )
+        .join("");
+      return pageLabel + paras;
+    })
+    .join("");
+}
+
+function insightsHTML(full) {
+  const ins = full.insights;
+  if (!ins || (!(ins.points || []).length && !(ins.connections || []).length)) return "";
+  return `<details open><summary>Claude's insights</summary><ul class="ins">${(ins.points || [])
+    .map((p) => `<li>${esc(p)}</li>`)
+    .join("")}${(ins.connections || []).map((c) => `<li>Connects to: ${esc(c)}</li>`).join("")}</ul></details>`;
+}
+
+function actionsHTML(full, capId) {
+  const confirmed = (full.confirmedActions || []).map((id) => ({ id, a: queueAction(id) }));
+  const ui = actionUIFor(capId);
+  let h = "";
+  if (confirmed.length) {
+    h += `<div class="note"><b>Confirmed</b><ul class="ins">${confirmed
+      .map(({ id, a }) => `<li>${esc(a ? a.action : id)}${a ? ` <span class="meta">· ${esc(PILLARS[a.pillar] || a.pillar)}</span>` : ""}</li>`)
+      .join("")}</ul></div>`;
+  }
+  const suggested = full.suggestedActions || [];
+  if (suggested.length) {
+    h += `<h2 style="margin:14px 0 6px">Actions for Life OS</h2><p class="sub" style="margin-bottom:8px">Tick only the ones you want to act on.</p>
+    <div class="card">${suggested
+      .map(
+        (a, i) =>
+          `<label class="chk" style="margin:0;color:var(--ink);font-weight:400"><input type="checkbox" data-act="pick" data-cid="${capId}" data-i="${i}" ${ui.picks.has(i) ? "checked" : ""}><span>${esc(a.action)}<small>${esc(PILLARS[a.pillar] || a.pillar)}</small></span></label>`
+      )
+      .join("")}</div>`;
+  }
+  h += ui.custom
+    .map(
+      (c, i) =>
+        `<div class="card"><div class="row"><span>${esc(c.action)}<span class="meta"> · ${esc(PILLARS[c.pillar] || c.pillar)}</span></span><button class="btn ghost danger" data-act="rmcustom" data-cid="${capId}" data-i="${i}" style="min-height:30px">Remove</button></div></div>`
+    )
+    .join("");
+  h += `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:8px">
+    <input type="text" id="ca-${capId}" placeholder="Add your own action">
+    <select id="cp-${capId}" aria-label="Pillar" style="width:auto">${Object.entries(PILLARS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
+    <div class="btnrow" style="margin-top:8px">
+      <button class="btn ghost" data-act="addcustom" data-cid="${capId}" style="flex:0 1 auto">Add action</button>
+      ${suggested.length || ui.picks.size || ui.custom.length ? `<button class="btn primary" data-act="saveactions" data-cid="${capId}" style="flex:0 1 auto">Save actions</button>` : ""}
+    </div>`;
+  return h;
 }
 
 function capCard(c) {
@@ -291,11 +388,27 @@ function capCard(c) {
     return `<div class="card"><div class="row"><div class="kicker">${esc(label)}</div><div style="display:flex;gap:6px;align-items:center"><span class="pill">Needs text</span>${delBtn}</div></div>
       <p class="sub" style="margin-top:8px">Couldn't fetch that link. Paste the transcript or key points to summarize it.</p></div>`;
   }
+
+  const full = S.fullCaptures[c.id];
   let body = "";
-  if (c.type === "thought") body += `<p class="quote">${esc(c.thought)}</p>`;
-  if (c.note) body += `<div class="note"><b>My note</b>${esc(c.note)}</div>`;
-  if ((c.actionIds || []).length) body += `<div class="note"><b>Actions</b><p class="sub">${c.actionIds.length} confirmed</p></div>`;
-  if (c.needsInsights) body += `<p class="sub" style="margin-top:8px">Insights pending — tap Process now.</p>`;
+  if (!full) {
+    // ready, but its full file hasn't loaded yet (openSource's fetch is
+    // still in flight) — light row still has enough for a minimal card.
+    if (c.type === "thought") body += `<p class="quote">${esc(c.thought)}</p>`;
+    body += `<p class="sub" style="margin-top:8px">Loading…</p>`;
+  } else {
+    if (full.type === "page") body += `<div class="reader">${pagesHTML(full, c.id)}</div>`;
+    if (full.type === "thought") body += `<p class="quote">${esc(full.thought)}</p>`;
+    if (full.type === "link" && full.summary) {
+      body += `<p style="margin-top:6px">${esc(full.summary.summary)}</p>`;
+      if ((full.summary.learnings || []).length) {
+        body += `<div class="kicker" style="margin-top:10px">Key learnings</div><ul class="ins">${full.summary.learnings.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`;
+      }
+    }
+    if (full.note) body += `<div class="note"><b>My note</b>${esc(full.note)}</div>`;
+    body += insightsHTML(full);
+    body += actionsHTML(full, c.id);
+  }
   return `<div class="card"><div class="row"><div class="kicker">${esc(label)} · ${fmtRelative(c.createdAt)}</div>${delBtn}</div>${body}</div>`;
 }
 
@@ -318,6 +431,57 @@ function vSource() {
   <h2>Notes <small>${(meta.captures || []).length || ""}</small></h2>
   ${(meta.captures || []).length ? meta.captures.slice().reverse().map(capCard).join("") : `<div class="empty">${isBook ? "Photograph a page or jot a thought to make your first note." : "Add a thought or paste text to capture what you learned."}</div>`}
   <div class="btnrow" style="margin-top:30px"><button class="btn ghost danger" data-act="delsrc" style="flex:0 1 auto">${S.delArm === "src" ? "Tap again to delete this and all its notes" : "Delete"}</button></div>`;
+}
+
+async function toggleHighlight(capId, pi, ai, si) {
+  const full = S.fullCaptures[capId];
+  if (!full) return;
+  const sentence = full.pages?.[pi]?.paragraphs?.[ai]?.sentences?.[si];
+  if (sentence === undefined) return;
+  const cur = full.highlights || [];
+  const idx = cur.findIndex((h) => h.page === pi && h.para === ai && h.sentence === si);
+  const next = idx >= 0 ? cur.filter((_, i) => i !== idx) : [...cur, { page: pi, para: ai, sentence: si, text: sentence }];
+  S.fullCaptures[capId] = { ...full, highlights: next };
+  render();
+  await S.store.saveHighlights(S.curId, capId, next);
+}
+
+function addCustomAction(capId) {
+  const input = $(`#ca-${capId}`);
+  const select = $(`#cp-${capId}`);
+  const action = (input?.value || "").trim();
+  if (!action) return;
+  actionUIFor(capId).custom.push({ action, pillar: select?.value || Object.keys(PILLARS)[0] });
+  render();
+}
+
+function removeCustomAction(capId, i) {
+  actionUIFor(capId).custom.splice(i, 1);
+  render();
+}
+
+async function saveActionsFor(capId) {
+  const full = S.fullCaptures[capId];
+  if (!full) return;
+  const ui = actionUIFor(capId);
+  const picked = (full.suggestedActions || []).filter((_, i) => ui.picks.has(i));
+  const actions = [...picked, ...ui.custom];
+  if (!actions.length) return;
+  S.busy = "saveactions";
+  render();
+  const newIds = await S.store.confirmCaptureActions(S.curId, capId, S.meta, actions);
+  S.busy = "";
+  if (newIds.length) {
+    toast(`${newIds.length} action${newIds.length > 1 ? "s" : ""} added.`);
+    delete S.actionUI[capId];
+    S.queue = await S.store.getQueue();
+    S.meta = await S.store.getSource(S.curId);
+    const full2 = await S.store.getCapture(S.curId, capId);
+    if (full2) S.fullCaptures[capId] = full2;
+    const idx = await S.store.getIndex();
+    S.sources = idx.sources;
+  }
+  render();
 }
 
 async function processNow(sourceId) {
@@ -457,6 +621,15 @@ document.addEventListener("change", async (e) => {
     const files = Array.from(e.target.files);
     e.target.value = "";
     await uploadPagePhotos(files);
+    return;
+  }
+  if (e.target.dataset.act === "pick") {
+    const capId = e.target.dataset.cid;
+    const i = parseInt(e.target.dataset.i, 10);
+    const ui = actionUIFor(capId);
+    if (e.target.checked) ui.picks.add(i);
+    else ui.picks.delete(i);
+    render();
   }
 });
 
@@ -548,6 +721,18 @@ document.addEventListener("click", async (e) => {
       await loadHome();
       break;
     }
+    case "hl":
+      await toggleHighlight(b.dataset.cid, parseInt(b.dataset.pi, 10), parseInt(b.dataset.ai, 10), parseInt(b.dataset.si, 10));
+      break;
+    case "addcustom":
+      addCustomAction(b.dataset.cid);
+      break;
+    case "rmcustom":
+      removeCustomAction(b.dataset.cid, parseInt(b.dataset.i, 10));
+      break;
+    case "saveactions":
+      await saveActionsFor(b.dataset.cid);
+      break;
     case "delcap": {
       const cid = b.dataset.cid;
       const key = `cap:${cid}`;
