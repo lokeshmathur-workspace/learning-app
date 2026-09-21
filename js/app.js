@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=4";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=4";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=4";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=4";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=5";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=5";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=5";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=5";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -32,7 +32,7 @@ const S = {
 };
 
 function actionUIFor(capId) {
-  if (!S.actionUI[capId]) S.actionUI[capId] = { picks: new Set(), custom: [] };
+  if (!S.actionUI[capId]) S.actionUI[capId] = { picks: new Set(), custom: [], saving: false };
   return S.actionUI[capId];
 }
 
@@ -330,43 +330,45 @@ function pagesHTML(full, capId) {
 function insightsHTML(full) {
   const ins = full.insights;
   if (!ins || (!(ins.points || []).length && !(ins.connections || []).length)) return "";
-  return `<details open><summary>Claude's insights</summary><ul class="ins">${(ins.points || [])
+  return `<div class="block block-insights"><div class="block-label">Insights</div><ul class="ins">${(ins.points || [])
     .map((p) => `<li>${esc(p)}</li>`)
-    .join("")}${(ins.connections || []).map((c) => `<li>Connects to: ${esc(c)}</li>`).join("")}</ul></details>`;
+    .join("")}${(ins.connections || []).map((c) => `<li>Connects to: ${esc(c)}</li>`).join("")}</ul></div>`;
 }
 
 function actionsHTML(full, capId) {
   const confirmed = (full.confirmedActions || []).map((id) => ({ id, a: queueAction(id) }));
-  const ui = actionUIFor(capId);
-  let h = "";
-  if (confirmed.length) {
-    h += `<div class="note"><b>Confirmed</b><ul class="ins">${confirmed
-      .map(({ id, a }) => `<li>${esc(a ? a.action : id)}${a ? ` <span class="meta">· ${esc(PILLARS[a.pillar] || a.pillar)}</span>` : ""}</li>`)
-      .join("")}</ul></div>`;
-  }
   const suggested = full.suggestedActions || [];
-  if (suggested.length) {
-    h += `<h2 style="margin:14px 0 6px">Actions for Life OS</h2><p class="sub" style="margin-bottom:8px">Tick only the ones you want to act on.</p>
-    <div class="card">${suggested
+  const ui = actionUIFor(capId);
+  if (!confirmed.length && !suggested.length && !ui.custom.length) return "";
+  const pickedCount = ui.picks.size + ui.custom.length;
+
+  let h = `<div class="block block-actions"><div class="block-label">Actions</div>`;
+  if (confirmed.length) {
+    h += confirmed
+      .map(({ id, a }) => `<div class="confirmedrow">${esc(a ? a.action : id)}${a ? ` <span class="meta" style="margin:0">· ${esc(PILLARS[a.pillar] || a.pillar)}</span>` : ""}</div>`)
+      .join("");
+  }
+  if (suggested.length || ui.custom.length) {
+    h += `<p class="sub" style="margin:${confirmed.length ? "10px" : "0"} 0 6px">Tick or add actions, then tap Save to send them to Life OS.</p>
+    <div class="acts-list">${suggested
       .map(
         (a, i) =>
-          `<label class="chk" style="margin:0;color:var(--ink);font-weight:400"><input type="checkbox" data-act="pick" data-cid="${capId}" data-i="${i}" ${ui.picks.has(i) ? "checked" : ""}><span>${esc(a.action)}<small>${esc(PILLARS[a.pillar] || a.pillar)}</small></span></label>`
+          `<div class="actrow"><input type="checkbox" id="pk-${capId}-${i}" data-act="pick" data-cid="${capId}" data-i="${i}" ${ui.picks.has(i) ? "checked" : ""}><label for="pk-${capId}-${i}">${esc(a.action)}<small>${esc(PILLARS[a.pillar] || a.pillar)}</small></label></div>`
+      )
+      .join("")}${ui.custom
+      .map(
+        (c, i) =>
+          `<div class="actrow"><input type="checkbox" checked disabled><label>${esc(c.action)}<small>${esc(PILLARS[c.pillar] || c.pillar)}</small></label><button class="rm" data-act="rmcustom" data-cid="${capId}" data-i="${i}" aria-label="Remove">×</button></div>`
       )
       .join("")}</div>`;
   }
-  h += ui.custom
-    .map(
-      (c, i) =>
-        `<div class="card"><div class="row"><span>${esc(c.action)}<span class="meta"> · ${esc(PILLARS[c.pillar] || c.pillar)}</span></span><button class="btn ghost danger" data-act="rmcustom" data-cid="${capId}" data-i="${i}" style="min-height:30px">Remove</button></div></div>`
-    )
-    .join("");
-  h += `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:8px">
+  h += `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:10px">
     <input type="text" id="ca-${capId}" placeholder="Add your own action">
     <select id="cp-${capId}" aria-label="Pillar" style="width:auto">${Object.entries(PILLARS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
     <div class="btnrow" style="margin-top:8px">
-      <button class="btn ghost" data-act="addcustom" data-cid="${capId}" style="flex:0 1 auto">Add action</button>
-      ${suggested.length || ui.picks.size || ui.custom.length ? `<button class="btn primary" data-act="saveactions" data-cid="${capId}" style="flex:0 1 auto">Save actions</button>` : ""}
-    </div>`;
+      <button class="btn ghost" data-act="addcustom" data-cid="${capId}" style="flex:0 1 auto">+ Add</button>
+      ${pickedCount ? `<button class="btn primary" data-act="saveactions" data-cid="${capId}" style="flex:1 1 auto" ${ui.saving ? "disabled" : ""}>${ui.saving ? "Saving…" : `Save ${pickedCount} action${pickedCount > 1 ? "s" : ""}`}</button>` : ""}
+    </div></div>`;
   return h;
 }
 
@@ -453,6 +455,8 @@ function addCustomAction(capId) {
   if (!action) return;
   actionUIFor(capId).custom.push({ action, pillar: select?.value || Object.keys(PILLARS)[0] });
   render();
+  const newInput = $(`#ca-${capId}`);
+  if (newInput) newInput.value = "";
 }
 
 function removeCustomAction(capId, i) {
@@ -467,10 +471,10 @@ async function saveActionsFor(capId) {
   const picked = (full.suggestedActions || []).filter((_, i) => ui.picks.has(i));
   const actions = [...picked, ...ui.custom];
   if (!actions.length) return;
-  S.busy = "saveactions";
+  ui.saving = true;
   render();
   const newIds = await S.store.confirmCaptureActions(S.curId, capId, S.meta, actions);
-  S.busy = "";
+  ui.saving = false;
   if (newIds.length) {
     toast(`${newIds.length} action${newIds.length > 1 ? "s" : ""} added.`);
     delete S.actionUI[capId];

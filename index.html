@@ -74,10 +74,10 @@ textarea{min-height:96px;resize:vertical;line-height:1.5}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
 .seg button{flex:1 1 0}
 .seg button[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
-.reader{font-family:var(--serif);font-size:18px;line-height:1.8}
+.reader{font-family:var(--serif);font-size:18px;line-height:1.8;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .reader p{margin:0 0 14px}
 .pgno{font-family:var(--sans);font-size:12px;font-weight:700;color:var(--faint);margin:6px 0 8px}
-.s{cursor:pointer;border-radius:3px;-webkit-box-decoration-break:clone;box-decoration-break:clone;padding:1px 0}
+.s{cursor:pointer;border-radius:3px;-webkit-box-decoration-break:clone;box-decoration-break:clone;padding:2px 1px;margin:0 1px}
 .s.hl{background:var(--mark);color:var(--mark-ink)}
 .hint{font-size:13px;color:var(--muted);background:var(--accent-bg);border-radius:10px;padding:8px 12px;margin:0 0 14px}
 .quote{font-family:var(--serif);font-size:16px;line-height:1.6;margin:8px 0 0;padding:2px 0}
@@ -85,6 +85,20 @@ textarea{min-height:96px;resize:vertical;line-height:1.5}
 .note b{font-size:12px;color:var(--muted);display:block;font-weight:700}
 ul.ins{margin:6px 0 0;padding-left:18px;font-size:15px}
 ul.ins li{margin:4px 0}
+.block{border-radius:12px;padding:12px 14px;margin-top:12px}
+.block-insights{background:var(--accent-bg)}
+.block-actions{background:var(--warn-bg)}
+.block-label{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:0 0 6px}
+.block .sub{margin:0 0 8px}
+.acts-list{display:flex;flex-direction:column;gap:0}
+.actrow{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);font-size:15px}
+.actrow:first-child{border-top:0}
+.actrow input[type=checkbox]{width:20px;height:20px;margin-top:2px;accent-color:var(--accent);flex:none}
+.actrow label{display:block;font:inherit;color:inherit;margin:0;cursor:pointer;flex:1 1 auto}
+.actrow small{display:block;color:var(--muted);font-size:12px}
+.actrow .rm{background:none;border:0;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;flex:none}
+.confirmedrow{display:flex;gap:8px;align-items:baseline;padding:6px 0;font-size:15px}
+.confirmedrow:before{content:'✓';color:var(--accent);font-weight:700}
 details{margin-top:10px}
 summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--accent);list-style:none}
 summary::-webkit-details-marker{display:none}
@@ -114,6 +128,6 @@ details[open] summary::before{content:'– '}
 <body>
 <main id="app"><p class="sub">Opening Learning…</p></main>
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="./js/app.js?v=4"></script>
+<script type="module" src="./js/app.js?v=5"></script>
 </body>
 </html>
