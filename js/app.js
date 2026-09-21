@@ -158,7 +158,24 @@ function vHome() {
   const vids = active.filter((s) => s.type === "video");
   const arts = active.filter((s) => s.type === "article" || s.type === "other");
   const done = S.sources.filter((s) => s.status === "finished").sort((a, b) => (b.finishedAt || "").localeCompare(a.finishedAt || ""));
-  const openActions = (S.queue.items || []).reduce((n, it) => n + (it.actionItems || []).filter((a) => a.status !== QUEUE_ACTION_STATUS.DONE).length, 0);
+  // Grouped by the queue item's own sourceType, not by matching S.sources —
+  // that also covers queue items from before this app existed (e.g. a brief
+  // written via a manual chat session), which have no sources/index.json
+  // row to match against but do carry sourceType. "youtube" (the existing
+  // real-data value) and "video" (this app's Type picker value) both roll
+  // up under "Videos".
+  const TYPE_LABEL = { book: "Books", video: "Videos", youtube: "Videos", article: "Articles", other: "Other" };
+  const actionsByType = {};
+  let openActions = 0;
+  for (const it of S.queue.items || []) {
+    const n = (it.actionItems || []).filter((a) => a.status !== QUEUE_ACTION_STATUS.DONE).length;
+    openActions += n;
+    if (n) {
+      const label = TYPE_LABEL[it.sourceType] || "Other";
+      actionsByType[label] = (actionsByType[label] || 0) + n;
+    }
+  }
+  const actionsBreakdown = Object.entries(actionsByType).map(([label, n]) => `${label} ${n}`).join(" · ");
   const captures = S.sources.reduce((n, s) => n + (s.captureCount || 0), 0);
   const pendingSources = S.sources.filter((s) => (s.pendingCount || 0) > 0);
   const pendingTotal = pendingSources.reduce((n, s) => n + s.pendingCount, 0);
@@ -189,7 +206,7 @@ function vHome() {
   return `<div class="top"><div><h1>Learning</h1><div class="sub">${prettyDate(todayISO())}</div></div>
   <button class="btn ghost" data-act="settings" style="flex:0 1 auto">Settings</button></div>
   <div class="stats"><div class="stat"><b>${captures}</b><span>Captures</span></div>
-  <button class="stat" data-act="actions"><b>${openActions}</b><span>Actions pending</span></button></div>
+  <button class="stat" data-act="actions"><b>${openActions}</b><span>Actions pending</span>${actionsBreakdown ? `<span style="display:block;margin-top:3px;font-size:11px;color:var(--faint);font-weight:600">${esc(actionsBreakdown)}</span>` : ""}</button></div>
   ${pendingTotal ? `<p class="hint" style="margin-top:14px">${pendingTotal} item${pendingTotal > 1 ? "s" : ""} waiting for processing — tap <b>Process now</b> from any of them, or from a source's page.</p>` : ""}
   <h2>Books you're reading <small>${books.length || ""}</small></h2>
   ${books.length ? books.map(bookCard).join("") : `<div class="empty">Start a book to capture pages, highlights and notes as you read.</div>`}
