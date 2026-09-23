@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=7";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=7";
-import { prepPhotoBatch } from "./photo.js?v=7";
-import { nowStamp, todayISO } from "./dateutil.js?v=7";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=7";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=8";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=8";
+import { prepPhotoBatch } from "./photo.js?v=8";
+import { nowStamp, todayISO } from "./dateutil.js?v=8";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=8";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";
@@ -121,8 +121,13 @@ export class Store {
     this.onFlash = onFlash || (() => {});
   }
 
-  async getIndex() {
-    if (this.index) return this.index.doc;
+  // force=true bypasses the in-memory cache — used by entry points where
+  // the user is (re)opening a screen and may be looking for a change made
+  // outside this session (e.g. the routine's own PR merging). Internal
+  // read-modify-write call sites keep the cache (force=false, the default)
+  // since they already reflect this session's own latest write.
+  async getIndex(force = false) {
+    if (!force && this.index) return this.index.doc;
     const { json, sha } = await this.gh.getFile(INDEX_PATH);
     const doc = json || { sources: [] };
     this.index = { doc, sha };
@@ -136,9 +141,9 @@ export class Store {
     return this._writeFile(INDEX_PATH, doc, () => this.index, (n) => (this.index = n), "learning: update sources index", true);
   }
 
-  async getSource(id) {
+  async getSource(id, force = false) {
     const key = id;
-    if (this.sources.has(key)) return this.sources.get(key).doc;
+    if (!force && this.sources.has(key)) return this.sources.get(key).doc;
     const { json, sha } = await this.gh.getFile(metaPath(id));
     if (!json) return null;
     this.sources.set(key, { doc: json, sha });
@@ -434,8 +439,8 @@ export class Store {
   // --- queue.json — the app is the ONLY writer of this file (plan Phase G
   // decision #3: the routine never touches it). Reused, not reshaped: same
   // schema already live in the Claude repo.
-  async getQueue() {
-    if (this.queue) return this.queue.doc;
+  async getQueue(force = false) {
+    if (!force && this.queue) return this.queue.doc;
     const { json, sha } = await this.gh.getFile(QUEUE_PATH);
     const doc = json || { items: [] };
     this.queue = { doc, sha };

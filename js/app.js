@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=7";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=7";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS, BRIEF_TOPICS } from "./constants.js?v=7";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=7";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=8";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=8";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS, BRIEF_TOPICS } from "./constants.js?v=8";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=8";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -30,7 +30,12 @@ const S = {
   fullCaptures: {}, // captureId -> full capture doc, for ready captures on the open source
   actionUI: {}, // captureId -> { picks: Set<index>, custom: [{action,pillar}] }
   briefForm: null, // working copy of the open source's draftBrief while reviewing/editing it
+  polling: false, // true while auto-checking the open source for the routine to finish
 };
+
+// Handle for the active poll interval (not part of S — it's a timer handle,
+// not render state; S.polling is the render-visible flag for it).
+let pollTimer = null;
 
 function actionUIFor(capId) {
   if (!S.actionUI[capId]) S.actionUI[capId] = { picks: new Set(), custom: [], saving: false };
@@ -73,8 +78,8 @@ async function enterApp() {
 
 async function loadHome() {
   try {
-    S.index = await S.store.getIndex();
-    S.queue = await S.store.getQueue();
+    S.index = await S.store.getIndex(true);
+    S.queue = await S.store.getQueue(true);
     S.sources = S.index.sources;
   } catch (e) {
     S.fatal = e.message || "Couldn't load your library.";
@@ -273,6 +278,7 @@ async function createSource() {
 
 /* ---------- Source detail (FR-3) ---------- */
 async function openSource(id) {
+  stopPolling();
   S.curId = id;
   S.view = "source";
   S.meta = null;
@@ -280,7 +286,7 @@ async function openSource(id) {
   S.actionUI = {};
   S.briefForm = null;
   render();
-  S.meta = await S.store.getSource(id);
+  S.meta = await S.store.getSource(id, true);
   render();
   // meta.json's captures[] is a light projection (no transcript/insights/
   // suggestedActions) — fetch each ready capture's full file so capCard()
@@ -508,7 +514,12 @@ function vSource() {
     ${isBook ? `<button class="btn primary" data-act="cap" data-mode="page" data-id="${s.id}">Add page</button>` : ""}
     <button class="btn${isBook ? "" : " primary"}" data-act="cap" data-mode="thought" data-id="${s.id}">Add thought</button>
   </div>
-  ${hasPending ? `<div class="btnrow"><button class="btn" data-act="processnow" data-id="${s.id}" ${S.busy === "process" ? "disabled" : ""}>${S.busy === "process" ? "Processing…" : "Process now"}</button></div>` : ""}
+  ${hasPending
+    ? S.polling
+      ? `<div class="hint" style="margin-top:0">Processing — usually a minute or two. You can leave this page and come back; it'll update on its own when it's done.</div>
+      <div class="btnrow"><button class="btn" data-act="checknow" data-id="${s.id}">Check now</button></div>`
+      : `<div class="btnrow"><button class="btn" data-act="processnow" data-id="${s.id}" ${S.busy === "process" ? "disabled" : ""}>${S.busy === "process" ? "Starting…" : "Process now"}</button></div>`
+    : ""}
   <div class="btnrow">${meta.status === "finished" ? `<button class="btn" data-act="reopen" data-id="${s.id}">Mark reading</button>` : `<button class="btn" data-act="finish" data-id="${s.id}">${isBook ? "Finished book" : "Mark done"}</button>`}</div>
   ${(meta.captures || []).length ? briefBlock(meta) : ""}
   <h2>Notes <small>${(meta.captures || []).length || ""}</small></h2>
@@ -584,6 +595,64 @@ async function dismissAction(actionId) {
   render();
 }
 
+// Auto-checks the open source for the routine to finish, so Lokesh doesn't
+// have to guess whether to keep refreshing or navigate away and back — it
+// polls in place and updates itself. Runs at most every 10s for ~5 minutes;
+// a manual "Check now" button (pollTick) is always available too, and stays
+// available after the timeout for a slower-than-usual run.
+function stopPolling(timedOut) {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  S.polling = false;
+  if (timedOut) toast("Still processing — taking longer than usual. Try Process now again in a bit, or check back later.");
+}
+
+async function pollTick(sourceId) {
+  // curId (not view) is the "still working within this source" signal —
+  // briefly switching to the Add page/thought sub-view keeps curId the
+  // same, so a tick here should still refresh quietly rather than stop.
+  if (S.curId !== sourceId) {
+    stopPolling();
+    return;
+  }
+  const meta = await S.store.getSource(sourceId, true);
+  if (!meta) return;
+  const isPending = (c) => [CAPTURE_STATUS.PENDING_TRANSCRIPTION, CAPTURE_STATUS.PENDING_SUMMARY].includes(c.status) || c.needsInsights;
+  const prevPendingIds = (S.meta?.captures || []).filter(isPending).map((c) => c.id);
+  S.meta = meta;
+  const stillPending = (meta.captures || []).some(isPending);
+  const newlyDone = (meta.captures || []).filter((c) => prevPendingIds.includes(c.id) && !isPending(c));
+  for (const c of newlyDone) {
+    if (c.status === CAPTURE_STATUS.READY) {
+      const full = await S.store.getCapture(sourceId, c.id);
+      if (full) S.fullCaptures[c.id] = full;
+    }
+  }
+  if (!stillPending) {
+    stopPolling();
+    if (newlyDone.length) toast("Processing finished.");
+  }
+  render();
+}
+
+function startPolling(sourceId) {
+  stopPolling();
+  S.polling = true;
+  let attempts = 0;
+  pollTimer = setInterval(async () => {
+    attempts++;
+    if (attempts > 30) {
+      stopPolling(true);
+      render();
+      return;
+    }
+    await pollTick(sourceId);
+  }, 10000);
+  render();
+}
+
 async function processNow(sourceId) {
   S.busy = "process";
   render();
@@ -591,6 +660,9 @@ async function processNow(sourceId) {
     const { sessionUrl } = await fireRoutine();
     toast("Processing started — usually a minute or two.");
     S.lastRoutineUrl = sessionUrl;
+    S.busy = "";
+    startPolling(sourceId);
+    return;
   } catch (e) {
     toast(e instanceof RoutineError ? e.message : "Couldn't start processing.");
   }
@@ -845,6 +917,7 @@ document.addEventListener("click", async (e) => {
       forgetAll();
       break;
     case "home":
+      stopPolling();
       S.view = "home";
       S.form = null;
       render();
@@ -892,6 +965,9 @@ document.addEventListener("click", async (e) => {
       break;
     case "processnow":
       await processNow(b.dataset.id);
+      break;
+    case "checknow":
+      await pollTick(b.dataset.id);
       break;
     case "createbrief":
       await startBriefDraft(b.dataset.id);
