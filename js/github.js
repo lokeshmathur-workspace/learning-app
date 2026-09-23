@@ -6,7 +6,7 @@
 // that learning-app must not depend on lifeos-app files at runtime) with one
 // addition: putBinaryFile(), for uploading photos, which lifeos-app never
 // needed since it only ever writes JSON documents through compact().
-import { compact } from "./compact.js?v=8";
+import { compact } from "./compact.js?v=9";
 
 const API = "https://api.github.com";
 

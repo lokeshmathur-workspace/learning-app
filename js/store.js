@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=8";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=8";
-import { prepPhotoBatch } from "./photo.js?v=8";
-import { nowStamp, todayISO } from "./dateutil.js?v=8";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=8";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=9";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=9";
+import { prepPhotoBatch } from "./photo.js?v=9";
+import { nowStamp, todayISO } from "./dateutil.js?v=9";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=9";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";

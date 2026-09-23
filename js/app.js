@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=8";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=8";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS, BRIEF_TOPICS } from "./constants.js?v=8";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=8";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=9";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=9";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS, BRIEF_TOPICS } from "./constants.js?v=9";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=9";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -287,6 +287,15 @@ async function openSource(id) {
   S.briefForm = null;
   render();
   S.meta = await S.store.getSource(id, true);
+  if (!S.meta) {
+    // Genuinely gone (deleted elsewhere, or a stale index row from before
+    // this session's cache-refresh fix) — drop it from the in-memory list
+    // so vSource()'s existing "This item was removed" branch shows instead
+    // of hanging on a spinner forever, and Home stops offering it too.
+    S.sources = S.sources.filter((r) => r.id !== id);
+    render();
+    return;
+  }
   render();
   // meta.json's captures[] is a light projection (no transcript/insights/
   // suggestedActions) — fetch each ready capture's full file so capCard()
