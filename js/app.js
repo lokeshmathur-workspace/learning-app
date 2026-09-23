@@ -2,10 +2,10 @@
 // approved prototype (one click listener, data-act dispatch), but backed by
 // real GitHub-API calls through store.js instead of the claude.ai artifact
 // runtime, so every action here is async.
-import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=10";
-import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=10";
-import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS, BRIEF_TOPICS } from "./constants.js?v=10";
-import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=10";
+import { Store, loadConfig, saveConfig, clearConfig, loadPinHash, savePinHash, clearPin, sha256Hex } from "./store.js?v=11";
+import { loadRoutineConfig, saveRoutineConfig, clearRoutineConfig, fireRoutine, RoutineError } from "./routine.js?v=11";
+import { PILLARS, SOURCE_TYPES, CAPTURE_STATUS, QUEUE_ACTION_STATUS, BRIEF_TOPICS } from "./constants.js?v=11";
+import { fmtRelative, todayISO, prettyDate } from "./dateutil.js?v=11";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -193,13 +193,17 @@ function vHome() {
   const pendingSources = S.sources.filter((s) => (s.pendingCount || 0) > 0);
   const pendingTotal = pendingSources.reduce((n, s) => n + s.pendingCount, 0);
 
+  const dashDelBtn = (s) => {
+    const armed = S.delArm === `dash:${s.id}`;
+    return `<button class="rm${armed ? " danger" : ""}" data-act="delsrcdash" data-id="${s.id}" aria-label="Delete">${armed ? "Confirm?" : "×"}</button>`;
+  };
   const bookCard = (s) => {
     const pct = s.totalPages && s.lastPage ? Math.min(100, Math.round((parseInt(s.lastPage, 10) / s.totalPages) * 100)) : null;
     const n = s.openActionCount || 0;
     return `<div class="card book" data-act="open" data-id="${s.id}">
       <div class="row"><div><div class="book-title">${esc(s.title)}</div>
       <div class="meta">${esc(s.author || "")}${s.author ? " · " : ""}${s.captureCount || 0} notes${s.lastPage ? " · last p. " + esc(s.lastPage) : ""}${s.updatedAt ? " · " + fmtRelative(s.updatedAt) : ""}</div></div>
-      ${n ? `<span class="pill">${n} action${n > 1 ? "s" : ""}</span>` : ""}</div>
+      <div style="display:flex;gap:8px;align-items:center">${n ? `<span class="pill">${n} action${n > 1 ? "s" : ""}</span>` : ""}${dashDelBtn(s)}</div></div>
       ${pct !== null && !isNaN(pct) ? `<div class="bar" aria-label="${pct}% read"><i style="width:${pct}%"></i></div>` : ""}
       <div class="btnrow">
         <button class="btn" data-act="cap" data-mode="page" data-id="${s.id}">Add page</button>
@@ -211,7 +215,7 @@ function vHome() {
       ? `<div class="list">${arr
           .map((s) => {
             const n = s.openActionCount || 0;
-            return `<div class="li" data-act="open" data-id="${s.id}"><div><div class="li-title">${esc(s.title)}</div><div class="meta">${esc(s.author || SOURCE_TYPES[s.type])} · ${s.captureCount || 0} notes${s.updatedAt ? " · " + fmtRelative(s.updatedAt) : ""}</div></div>${n ? `<span class="pill">${n}</span>` : ""}</div>`;
+            return `<div class="li" data-act="open" data-id="${s.id}"><div><div class="li-title">${esc(s.title)}</div><div class="meta">${esc(s.author || SOURCE_TYPES[s.type])} · ${s.captureCount || 0} notes${s.updatedAt ? " · " + fmtRelative(s.updatedAt) : ""}</div></div><div style="display:flex;gap:8px;align-items:center">${n ? `<span class="pill">${n}</span>` : ""}${dashDelBtn(s)}</div></div>`;
           })
           .join("")}</div>`
       : "";
@@ -395,7 +399,8 @@ function actionsHTML(full, capId) {
 }
 
 function capCard(c) {
-  const label = c.type === "page" ? (c.pages || []).map((p) => (p.page ? "p. " + p.page : "page")).join(", ") : c.type === "link" ? "Summary" : "Thought" + (c.pageRef ? " · p. " + c.pageRef : "");
+  const isBookSrc = S.sources.find((x) => x.id === S.curId)?.type === "book";
+  const label = c.type === "page" ? (c.pages || []).map((p) => (p.page ? "p. " + p.page : isBookSrc ? "page" : "screenshot")).join(", ") : c.type === "link" ? "Summary" : "Thought" + (c.pageRef ? " · p. " + c.pageRef : "");
   const armed = S.delArm === `cap:${c.id}`;
   const delBtn = `<button class="btn ghost danger" data-act="delcap" data-cid="${c.id}" style="min-height:30px">${armed ? "Confirm" : "Delete"}</button>`;
   const pending = [CAPTURE_STATUS.PENDING_TRANSCRIPTION, CAPTURE_STATUS.PENDING_SUMMARY].includes(c.status);
@@ -406,7 +411,7 @@ function capCard(c) {
   }
   if (c.status === CAPTURE_STATUS.NEEDS_RETAKE) {
     return `<div class="card"><div class="row"><div class="kicker">${esc(label)}</div><div style="display:flex;gap:6px;align-items:center"><span class="pill">Couldn't read this</span>${delBtn}</div></div>
-      <p class="sub" style="margin-top:8px">No usable text came back from this photo. Retake it with better lighting.</p></div>`;
+      <p class="sub" style="margin-top:8px">No usable text came back from this ${isBookSrc ? "photo. Retake it with better lighting." : "image. Try again with a clearer photo or screenshot."}</p></div>`;
   }
   if (c.status === CAPTURE_STATUS.NEEDS_TEXT) {
     return `<div class="card"><div class="row"><div class="kicker">${esc(label)}</div><div style="display:flex;gap:6px;align-items:center"><span class="pill">Needs text</span>${delBtn}</div></div>
@@ -520,8 +525,8 @@ function vSource() {
   <div class="kicker">${SOURCE_TYPES[s.type]}${meta.status === "finished" ? " · finished" : ""}</div><h1>${esc(meta.title)}</h1>
   <div class="sub">${esc(meta.author || "")}${meta.url ? ` · <a href="${esc(meta.url)}" target="_blank" rel="noopener">Open link</a>` : ""}</div>
   <div class="btnrow">
-    ${isBook ? `<button class="btn primary" data-act="cap" data-mode="page" data-id="${s.id}">Add page</button>` : ""}
-    <button class="btn${isBook ? "" : " primary"}" data-act="cap" data-mode="thought" data-id="${s.id}">Add thought</button>
+    <button class="btn primary" data-act="cap" data-mode="page" data-id="${s.id}">${isBook ? "Add page" : "Add screenshot"}</button>
+    <button class="btn" data-act="cap" data-mode="thought" data-id="${s.id}">Add thought</button>
   </div>
   ${hasPending
     ? S.polling
@@ -532,7 +537,7 @@ function vSource() {
   <div class="btnrow">${meta.status === "finished" ? `<button class="btn" data-act="reopen" data-id="${s.id}">Mark reading</button>` : `<button class="btn" data-act="finish" data-id="${s.id}">${isBook ? "Finished book" : "Mark done"}</button>`}</div>
   ${(meta.captures || []).length ? briefBlock(meta) : ""}
   <h2>Notes <small>${(meta.captures || []).length || ""}</small></h2>
-  ${(meta.captures || []).length ? meta.captures.slice().reverse().map(capCard).join("") : `<div class="empty">${isBook ? "Photograph a page or jot a thought to make your first note." : "Add a thought or paste text to capture what you learned."}</div>`}
+  ${(meta.captures || []).length ? meta.captures.slice().reverse().map(capCard).join("") : `<div class="empty">${isBook ? "Photograph a page or jot a thought to make your first note." : "Add a screenshot, jot a thought, or paste text to capture what you learned."}</div>`}
   <div class="btnrow" style="margin-top:30px"><button class="btn ghost danger" data-act="delsrc" style="flex:0 1 auto">${S.delArm === "src" ? "Tap again to delete this and all its notes" : "Delete"}</button></div>`;
 }
 
@@ -754,11 +759,12 @@ function vCapture() {
   const d = S.draft;
   const s = S.sources.find((x) => x.id === d.srcId) || { title: "" };
   if (d.mode === "page") {
-    return `<button class="btn ghost back" data-act="cancelcap">‹ ${esc(s.title)}</button><h1>Add page</h1>
-    <p class="sub" style="margin:10px 0 16px">Take a photo of the page, or pick up to 4 pages from your photos. Up to 4 pages upload together and process as one note.</p>
+    const isBook = s.type === "book";
+    return `<button class="btn ghost back" data-act="cancelcap">‹ ${esc(s.title)}</button><h1>${isBook ? "Add page" : "Add screenshot"}</h1>
+    <p class="sub" style="margin:10px 0 16px">${isBook ? "Take a photo of the page, or pick up to 4 pages from your photos. Up to 4 pages upload together and process as one note." : "Take a screenshot or photo, or pick up to 4 images from your photos. They upload together and process as one note."}</p>
     ${S.busy === "upload"
       ? `<div class="busy"><span class="dot"></span>Uploading…</div>`
-      : `<label class="btn primary filebtn" style="width:100%;margin:0">Take or choose photos<input type="file" accept="image/*" multiple data-act="photos" aria-label="Take or choose photos"></label>`}
+      : `<label class="btn primary filebtn" style="width:100%;margin:0">${isBook ? "Take or choose photos" : "Take or choose screenshots"}<input type="file" accept="image/*" multiple data-act="photos" aria-label="Take or choose photos"></label>`}
     ${d.err ? `<p class="err">${esc(d.err)}</p>` : ""}`;
   }
   if (d.mode !== "thought") {
@@ -914,7 +920,7 @@ document.addEventListener("click", async (e) => {
   if (!b) return;
   const a = b.dataset.act;
   if (b.tagName === "LABEL" && b.querySelector("input[type=file]")) return;
-  if (a !== "delsrc" && a !== "delcap") S.delArm = null;
+  if (a !== "delsrc" && a !== "delcap" && a !== "delsrcdash") S.delArm = null;
   switch (a) {
     case "connect":
       await connect();
@@ -1032,6 +1038,18 @@ document.addEventListener("click", async (e) => {
         S.sources = S.sources.map((r) => (r.id === b.dataset.id ? { ...r, status: newMeta.status } : r));
       }
       render();
+      break;
+    }
+    case "delsrcdash": {
+      const key = `dash:${b.dataset.id}`;
+      if (S.delArm !== key) {
+        S.delArm = key;
+        return render();
+      }
+      S.delArm = null;
+      const dashOk = await S.store.deleteSource(b.dataset.id);
+      toast(dashOk ? "Deleted." : "Deleted — but couldn't update your library list. Reopen Library in a moment and it should catch up.");
+      await loadHome();
       break;
     }
     case "delsrc": {
