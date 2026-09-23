@@ -9,11 +9,11 @@
 // then meta.json, then index.json — so a failure partway through leaves the
 // projections merely stale (recoverable by rebuildProjections()), never the
 // authoritative data wrong.
-import { GitHubStore, GitHubStoreError } from "./github.js?v=9";
-import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=9";
-import { prepPhotoBatch } from "./photo.js?v=9";
-import { nowStamp, todayISO } from "./dateutil.js?v=9";
-import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=9";
+import { GitHubStore, GitHubStoreError } from "./github.js?v=10";
+import { nextSourceId, nextCaptureId, nextActionId, nextQueueItemId } from "./compact.js?v=10";
+import { prepPhotoBatch } from "./photo.js?v=10";
+import { nowStamp, todayISO } from "./dateutil.js?v=10";
+import { CAPTURE_STATUS, SOURCE_STATUS, QUEUE_ACTION_STATUS } from "./constants.js?v=10";
 
 const CONFIG_KEY = "learning.gh";
 const PIN_KEY = "learning.pin";
@@ -134,11 +134,34 @@ export class Store {
     return doc;
   }
 
-  async _writeIndex(patchRows) {
-    const cur = this.index || { doc: { sources: [] }, sha: null };
-    const doc = { sources: patchRows };
-    this.index = { doc, sha: cur.sha };
-    return this._writeFile(INDEX_PATH, doc, () => this.index, (n) => (this.index = n), "learning: update sources index", true);
+  // Rewrites index.json from a row-compute function rather than a
+  // precomputed array, and retries once on a sha conflict by re-fetching a
+  // fresh index and recomputing from THAT — safe because the retry starts
+  // from whatever the conflicting writer actually left (e.g. the routine's
+  // own captureCount bump on an unrelated row), not a stale copy of the
+  // whole array. index.json is the single most write-contended file in the
+  // app (every source-level action touches it, plus the routine rewrites
+  // it after every run) — this is where a stale-sha conflict was actually
+  // observed in production: it used to fail silently, leaving an
+  // already-deleted source's row behind forever. Returns true/false so
+  // callers that need to know (deleteSource/deleteCapture) can report it
+  // honestly instead of always claiming success.
+  async _writeIndex(computeRows) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const idx = await this.getIndex(attempt > 0);
+      const doc = { sources: computeRows(idx.sources) };
+      const prevSha = this.index?.sha;
+      this.index = { doc, sha: prevSha };
+      try {
+        const { sha } = await this.gh.putFile(INDEX_PATH, doc, prevSha, "learning: update sources index");
+        this.index = { doc, sha };
+        return true;
+      } catch (e) {
+        if (e instanceof GitHubStoreError && e.code === "conflict" && attempt === 0) continue;
+        this.onFlash(e instanceof GitHubStoreError ? e.message : "Couldn't save.", true);
+        return false;
+      }
+    }
   }
 
   async getSource(id, force = false) {
@@ -177,7 +200,7 @@ export class Store {
       true
     );
     if (!ok) return null;
-    await this._writeIndex([...idx.sources, indexRowFrom(meta)]);
+    await this._writeIndex((sources) => [...sources, indexRowFrom(meta)]);
     return id;
   }
 
@@ -196,8 +219,7 @@ export class Store {
     this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
     const ok = await this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: ${sourceId} ${status}`, true);
     if (!ok) return null;
-    const idx = await this.getIndex();
-    await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+    await this._writeIndex((sources) => sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
     return newMeta;
   }
 
@@ -314,8 +336,7 @@ export class Store {
       true
     );
 
-    const idx = await this.getIndex();
-    await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+    await this._writeIndex((sources) => sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
     return capId;
   }
 
@@ -345,8 +366,7 @@ export class Store {
     const newMeta = { ...meta, captures: rows };
     this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
     await this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: rebuild ${sourceId} projection`, true);
-    const idx = await this.getIndex();
-    await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+    await this._writeIndex((sources) => sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
   }
 
   // Deletes a source: its meta.json, every capture file, any leftover inbox
@@ -373,8 +393,7 @@ export class Store {
       /* best-effort */
     }
     this.sources.delete(sourceId);
-    const idx = await this.getIndex();
-    await this._writeIndex(idx.sources.filter((r) => r.id !== sourceId));
+    const indexOk = await this._writeIndex((sources) => sources.filter((r) => r.id !== sourceId));
 
     const q = await this.getQueue();
     const kept = q.items.filter((item) => {
@@ -385,7 +404,10 @@ export class Store {
     if (kept.length !== q.items.length || kept.some((item, i) => item !== q.items[i])) {
       await this.saveQueue(kept, true);
     }
-    return true;
+    // The source's own files are already gone either way — indexOk only
+    // reflects whether the index.json row (the one that made a deleted
+    // source keep reappearing on Home, per the bug this fixes) came along.
+    return indexOk;
   }
 
   // Deletes one note/page/link within a source (FR-3's per-card delete,
@@ -415,8 +437,7 @@ export class Store {
     const newMeta = { ...meta, captures: (meta.captures || []).filter((c) => c.id !== captureId), updatedAt: new Date().toISOString() };
     this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
     await this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: ${sourceId} remove ${captureId}`, true);
-    const idx = await this.getIndex();
-    await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+    const indexOk = await this._writeIndex((sources) => sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
     this.captures.delete(`${sourceId}/${captureId}`);
 
     const actionIds = (row && row.actionIds) || (full && full.confirmedActions) || [];
@@ -433,7 +454,7 @@ export class Store {
         .filter((item) => item.actionItems.length > 0);
       if (changed) await this.saveQueue(kept, true);
     }
-    return true;
+    return indexOk;
   }
 
   // --- queue.json — the app is the ONLY writer of this file (plan Phase G
@@ -480,7 +501,13 @@ export class Store {
   // that path never runs through this app.
   async confirmActions(sourceId, sourceMeta, actions) {
     const q = await this.getQueue();
-    let item = q.items.find((it) => it.id === sourceMeta.queueItemId);
+    // sourceMeta.queueItemId starts as "" until this source's first
+    // confirmed action — guard against matching some unrelated item that
+    // also happens to have id "" (a real bug found in production: a
+    // pre-app legacy queue item with id "" silently absorbed a new
+    // source's actions instead of getting its own item, and being
+    // sourceId-less, later escaped deleteSource()'s cascade cleanup).
+    let item = sourceMeta.queueItemId ? q.items.find((it) => it.id === sourceMeta.queueItemId) : null;
     if (!item) {
       const id = nextQueueItemId(todayISO(), q.items.map((it) => it.id));
       item = {
@@ -572,8 +599,7 @@ export class Store {
       };
       this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
       await this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: ${sourceId} confirm actions`, true);
-      const idx = await this.getIndex();
-      await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+      await this._writeIndex((sources) => sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
     }
     return newIds;
   }
@@ -615,8 +641,7 @@ export class Store {
     delete newMeta.draftBrief;
     this.sources.set(sourceId, { doc: newMeta, sha: this.sources.get(sourceId)?.sha });
     await this._writeFile(metaPath(sourceId), newMeta, () => this.sources.get(sourceId), (n) => this.sources.set(sourceId, n), `learning: ${sourceId} finished`, true);
-    const idx = await this.getIndex();
-    await this._writeIndex(idx.sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
+    await this._writeIndex((sources) => sources.map((r) => (r.id === sourceId ? indexRowFrom(newMeta) : r)));
     return true;
   }
 
